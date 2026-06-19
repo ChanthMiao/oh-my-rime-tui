@@ -15,19 +15,11 @@ pub enum AppError {
     #[error("ZIP 错误: {0}")]
     Zip(#[from] zip::result::ZipError),
 
-    #[allow(dead_code)]
-    #[error("解压失败: {0}")]
-    Extract(String),
-
     #[error("备份失败: {0}")]
     Backup(String),
 
     #[error("不支持的操作系统: {0}")]
     UnsupportedOs(String),
-
-    #[allow(dead_code)]
-    #[error("目录未设置")]
-    DirNotSet,
 
     #[error("路径不安全: {path}")]
     UnsafePath { path: PathBuf },

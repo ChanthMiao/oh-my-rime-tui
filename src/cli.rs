@@ -209,7 +209,7 @@ fn print_download_progress(info: ProgressInfo) {
             ProgressInfo::format_bytes(info.downloaded),
         );
     }
-    io::stdout().flush().ok();
+    io::stderr().flush().ok();
 }
 
 fn print_extract_progress(p: ExtractProgress) {
@@ -228,7 +228,7 @@ fn print_extract_progress(p: ExtractProgress) {
     } else {
         eprint!("\r  解压中...");
     }
-    io::stdout().flush().ok();
+    io::stderr().flush().ok();
 }
 
 fn make_extract_callback() -> ExtractCallback {

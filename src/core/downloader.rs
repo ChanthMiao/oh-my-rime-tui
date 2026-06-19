@@ -14,8 +14,6 @@ pub struct ProgressInfo {
     pub percentage: f64,
     pub speed: f64,
     pub completed: bool,
-    #[allow(dead_code)]
-    pub error: Option<String>,
 }
 
 impl ProgressInfo {
@@ -48,11 +46,6 @@ impl ProgressInfo {
             format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
         }
     }
-}
-
-#[allow(dead_code)]
-pub async fn download(url: &str) -> AppResult<Vec<u8>> {
-    download_with_progress(url, None, &AtomicBool::new(false)).await
 }
 
 pub async fn download_with_progress(
@@ -128,7 +121,6 @@ pub async fn download_with_progress(
                 percentage: pct,
                 speed,
                 completed: false,
-                error: None,
             });
         }
     }
@@ -140,7 +132,6 @@ pub async fn download_with_progress(
             percentage: 100.0,
             speed: 0.0,
             completed: true,
-            error: None,
         });
     }
 

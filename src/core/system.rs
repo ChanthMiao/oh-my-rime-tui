@@ -127,21 +127,21 @@ fn default_target_dir(flavor: RimeFlavor) -> AppResult<PathBuf> {
     Ok(path)
 }
 
-pub fn expand_homedir(path: &PathBuf) -> PathBuf {
+pub fn expand_homedir(path: &std::path::Path) -> PathBuf {
     let path_str = path.to_string_lossy();
     if path_str == "~" {
         std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .map(PathBuf::from)
-            .unwrap_or(path.clone())
+            .unwrap_or_else(|_| path.to_path_buf())
     } else if path_str.starts_with("~/") || path_str.starts_with("~\\") {
         if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
             PathBuf::from(home).join(&path_str[2..])
         } else {
-            path.clone()
+            path.to_path_buf()
         }
     } else {
-        path.clone()
+        path.to_path_buf()
     }
 }
 

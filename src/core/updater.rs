@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use zip::ZipArchive;
@@ -46,23 +45,15 @@ fn extract_zip_with_progress(
 
     let mut archive = ZipArchive::new(std::io::Cursor::new(&af.body))?;
     for (entry_index, name) in af.names.iter().enumerate() {
-        let relative = if let Some(prefix) = filter {
-            let r = name.strip_prefix(prefix).unwrap_or(name);
-            if r.is_empty() || r == name && !r.is_empty() {
-                if !name.starts_with(prefix) {
-                    continue;
-                }
-            }
-            r
-        } else {
-            name.as_str()
+        let rel = match filter {
+            Some(prefix) => match name.strip_prefix(prefix) {
+                Some(rest) if !rest.is_empty() => rest,
+                _ => continue,
+            },
+            None => name.as_str(),
         };
 
-        if relative.is_empty() {
-            continue;
-        }
-
-        let target_path = safe_join(target_dir, relative)?;
+        let target_path = safe_join(target_dir, rel)?;
         let mut file = archive.by_index(entry_index)?;
 
         if file.is_dir() {
@@ -78,7 +69,7 @@ fn extract_zip_with_progress(
             cb(ExtractProgress {
                 current: entry_index + 1,
                 total,
-                current_file: relative.to_string(),
+                current_file: rel.to_string(),
             });
         }
     }
@@ -165,16 +156,6 @@ fn extract_file(file: &mut zip::read::ZipFile<'_>, target_path: &Path) -> AppRes
     let mut out = std::fs::File::create(target_path)?;
     let mut reader = file;
     std::io::copy(&mut reader, &mut out)?;
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn extract_file_direct<R: Read + ?Sized>(reader: &mut R, target_path: &Path) -> AppResult<()> {
-    if let Some(parent) = target_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut out = std::fs::File::create(target_path)?;
-    std::io::copy(reader, &mut out)?;
     Ok(())
 }
 
