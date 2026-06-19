@@ -685,30 +685,37 @@ mod tui {
 
     fn render_progress(f: &mut Frame<'_>, area: Rect, app: &App) {
         let progress_state = app.progress.lock().unwrap().clone();
-        // lock is released here because we cloned the data
 
-        let (title, pct, label) = match progress_state.phase {
+        // Split area: status line above, gauge in middle, detail below
+        let vert = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),  // status label
+                Constraint::Length(3),  // gauge
+                Constraint::Length(1),  // detail
+            ])
+            .split(center_rect(area, area.width.min(50), 5));
+
+        let (title, pct, label, detail) = match progress_state.phase {
             ProgressPhase::Download => {
                 let p = progress_state.percentage.min(100.0) / 100.0;
                 let label = format!(
-                    "{:.1}% {} / {} {}/s ETA: {}",
+                    "{:.0}%  {} / {}",
                     progress_state.percentage,
                     downloader::ProgressInfo::format_bytes(progress_state.downloaded),
                     downloader::ProgressInfo::format_bytes(progress_state.total),
-                    if progress_state.speed > 0.0 {
-                        downloader::ProgressInfo::format_speed(progress_state.speed)
-                    } else {
-                        "-".into()
-                    },
-                    if progress_state.total > 0 && progress_state.speed > 0.0 && progress_state.downloaded < progress_state.total {
-                        let remaining = (progress_state.total - progress_state.downloaded) as f64 / progress_state.speed;
-                        let s = remaining as u64;
-                        if s < 60 { format!("{}s", s) } else if s < 3600 { format!("{}m{}s", s / 60, s % 60) } else { format!("{}h{}m", s / 3600, (s % 3600) / 60) }
-                    } else {
-                        "-".into()
-                    }
                 );
-                (" 下载进度 ", p, label)
+                let detail = if progress_state.total > 0 && progress_state.speed > 0.0 {
+                    let remaining = (progress_state.total - progress_state.downloaded) as f64 / progress_state.speed;
+                    let s = remaining as u64;
+                    let eta = if s < 60 { format!("{}s", s) }
+                        else if s < 3600 { format!("{}m{}s", s / 60, s % 60) }
+                        else { format!("{}h{}m", s / 3600, (s % 3600) / 60) };
+                    format!("{}  ETA: {}", downloader::ProgressInfo::format_speed(progress_state.speed), eta)
+                } else {
+                    String::new()
+                };
+                (" 下载方案包 ", p, label, detail)
             }
             ProgressPhase::Extract => {
                 let p = if progress_state.extract_total > 0 {
@@ -716,39 +723,52 @@ mod tui {
                 } else {
                     0.0
                 };
-                let label = format!(
-                    "{}/{}  {}",
-                    progress_state.extract_current,
-                    progress_state.extract_total,
-                    progress_state.extract_file,
-                );
-                (" 解压进度 ", p, label)
+                let label = format!("{}/{} 个文件", progress_state.extract_current, progress_state.extract_total);
+                let detail = if progress_state.extract_file.len() > 45 {
+                    format!("...{}", &progress_state.extract_file[progress_state.extract_file.len().saturating_sub(42)..])
+                } else {
+                    progress_state.extract_file.clone()
+                };
+                (" 解压方案包 ", p, label, detail)
             }
             ProgressPhase::Idle => {
-                (" 进度 ", 0.0, progress_state.label.clone())
+                (" 准备中 ", 0.0, progress_state.label.clone(), String::new())
             }
         };
 
+        // Status line
+        let status = Paragraph::new(Span::styled(
+            title,
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center);
+        f.render_widget(status, vert[0]);
+
+        // Gauge
         let gauge = Gauge::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(title)
-                    .style(Style::default().fg(Color::Cyan)),
-            )
+            .block(Block::default().borders(Borders::NONE))
             .gauge_style(
                 Style::default()
                     .fg(Color::Cyan)
-                    .bg(Color::Black)
+                    .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),
             )
             .ratio(pct)
             .label(label);
+        f.render_widget(gauge, vert[1]);
 
-        f.render_widget(gauge, area);
+        // Detail line
+        if !detail.is_empty() {
+            let detail_p = Paragraph::new(Span::styled(detail, Style::default().fg(Color::DarkGray)))
+                .alignment(Alignment::Center);
+            f.render_widget(detail_p, vert[2]);
+        }
     }
 
     fn render_result(f: &mut Frame<'_>, area: Rect, app: &App) {
+        let line_count = app.result_message.lines().count() as u16;
+        let height = (line_count + 2).min(area.height);
+
         let para = Paragraph::new(app.result_message.as_str())
             .block(
                 Block::default()
@@ -759,6 +779,13 @@ mod tui {
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
-        f.render_widget(para, area);
+        let result_area = center_rect(area, area.width.min(50), height);
+        f.render_widget(para, result_area);
+    }
+
+    fn center_rect(r: Rect, width: u16, height: u16) -> Rect {
+        let x = r.x + (r.width.saturating_sub(width) / 2);
+        let y = r.y + (r.height.saturating_sub(height) / 2);
+        Rect { x, y, width, height }
     }
 }
