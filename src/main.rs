@@ -546,24 +546,31 @@ mod tui {
 
     fn ui(f: &mut Frame<'_>, app: &App) {
         let area = f.area();
+
+        // Outer border around entire app
+        let outer = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title_top(Span::styled(
+                format!(" {} v{} ", constants::APP_NAME, constants::APP_VERSION),
+                Style::default().fg(Color::White).bold(),
+            ));
+        f.render_widget(outer.clone(), area);
+        let inner = outer.inner(area);
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(4),
+                Constraint::Length(2),
                 Constraint::Min(1),
-                Constraint::Length(3),
+                Constraint::Length(2),
             ])
-            .split(area);
+            .split(inner);
 
         // Header
-        let header = Block::default()
-            .style(Style::default().fg(Color::Cyan).bold());
-        let header_text = Paragraph::new(format!(
-            " Oh My Rime TUI v{} - Rime 输入法配置管理工具 ",
-            constants::APP_VERSION
-        ))
-        .block(header)
-        .alignment(Alignment::Center);
+        let header_text = Paragraph::new("Rime 输入法配置管理工具")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
         f.render_widget(header_text, chunks[0]);
 
         // Content
@@ -585,13 +592,18 @@ mod tui {
         };
         let footer_para = Paragraph::new(Span::styled(
             footer,
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Cyan),
         ))
         .alignment(Alignment::Center);
         f.render_widget(footer_para, chunks[2]);
     }
 
     fn render_menu(f: &mut Frame<'_>, area: Rect, app: &App) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(area);
+
         let items: Vec<ListItem> = menu_items()
             .iter()
             .enumerate()
@@ -622,25 +634,16 @@ mod tui {
 
         let mut state = ListState::default();
         state.select(Some(app.selected));
-        f.render_stateful_widget(list, area, &mut state);
+        f.render_stateful_widget(list, chunks[0], &mut state);
 
-        // Show OS and target dir info
         let info = if let Some(ref dir) = app.target_dir {
-            format!(" OS: {:?}  |  {}", app.os, dir.display())
+            format!(" {:?}  |  {}", app.os, dir.display())
         } else {
-            format!(" OS: {:?}", app.os)
+            format!(" {:?}", app.os)
         };
-        let os_info = Paragraph::new(Span::styled(
-            info,
-            Style::default().fg(Color::Green),
-        ));
-        let info_area = Rect {
-            x: area.x + 2,
-            y: area.y + area.height.saturating_sub(2),
-            width: area.width.saturating_sub(4),
-            height: 1,
-        };
-        f.render_widget(os_info, info_area);
+        let os_info = Paragraph::new(Span::styled(info, Style::default().fg(Color::Green)))
+            .alignment(Alignment::Left);
+        f.render_widget(os_info, chunks[1]);
     }
 
     fn render_os_select(f: &mut Frame<'_>, area: Rect, app: &App) {
