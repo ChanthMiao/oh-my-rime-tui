@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::core::downloader::{self, ProgressInfo};
 use crate::core::system::{self, OsType};
-use crate::core::updater;
+use crate::core::updater::{self, ExtractCallback, ExtractProgress};
 use crate::error::AppResult;
 
 pub async fn run_interactive() -> AppResult<()> {
@@ -117,7 +117,7 @@ fn select_target_dir(os: &OsType, reader: &mut impl BufRead) -> AppResult<std::p
     Ok(dir)
 }
 
-fn print_progress(info: ProgressInfo) {
+fn print_download_progress(info: ProgressInfo) {
     if info.completed {
         println!();
         return;
@@ -130,7 +130,7 @@ fn print_progress(info: ProgressInfo) {
             .collect();
         let eta = info.format_eta();
         print!(
-            "\r[{}] {:.1}% {}/{} {}/s ETA: {}",
+            "\r  [{}] {:.1}% {}/{} {}/s ETA: {}",
             bar,
             info.percentage,
             ProgressInfo::format_bytes(info.downloaded),
@@ -140,11 +140,41 @@ fn print_progress(info: ProgressInfo) {
         );
     } else {
         print!(
-            "\r下载中... {}",
+            "\r  下载中... {}",
             ProgressInfo::format_bytes(info.downloaded)
         );
     }
     io::stdout().flush().ok();
+}
+
+fn print_extract_progress(p: ExtractProgress) {
+    if p.total > 0 {
+        let bar_width = 30;
+        let pct = p.current as f64 / p.total as f64;
+        let filled = (pct * bar_width as f64) as usize;
+        let bar: String = (0..bar_width)
+            .map(|i| if i < filled { '█' } else { '░' })
+            .collect();
+        // show the file name, truncated if needed
+        let mut name = p.current_file;
+        if name.len() > 40 {
+            name = format!("...{}", &name[name.len().saturating_sub(37)..]);
+        }
+        print!(
+            "\r  [{}] {}/{}  {}",
+            bar,
+            p.current,
+            p.total,
+            name,
+        );
+    } else {
+        print!("\r  解压中...");
+    }
+    io::stdout().flush().ok();
+}
+
+fn make_extract_callback() -> ExtractCallback {
+    Box::new(print_extract_progress)
 }
 
 async fn handle_update_scheme(target_dir: &std::path::Path) -> AppResult<()> {
@@ -154,12 +184,13 @@ async fn handle_update_scheme(target_dir: &std::path::Path) -> AppResult<()> {
     println!("正在下载方案包...");
     let data = downloader::download_with_progress(
         url,
-        Some(Arc::new(print_progress)),
+        Some(Arc::new(print_download_progress)),
         &cancel,
     ).await?;
 
-    println!("正在更新主方案...");
-    updater::update_main_scheme(&data, target_dir)?;
+    println!("正在解压方案包...");
+    updater::update_main_scheme_with_progress(&data, target_dir, Some(make_extract_callback()))?;
+    println!();
     println!("✅ 主方案更新完成！");
     Ok(())
 }
@@ -171,11 +202,11 @@ async fn handle_update_model(target_dir: &std::path::Path) -> AppResult<()> {
     println!("正在下载模型...");
     let data = downloader::download_with_progress(
         url,
-        Some(Arc::new(print_progress)),
+        Some(Arc::new(print_download_progress)),
         &cancel,
     ).await?;
 
-    println!("正在更新模型...");
+    println!("正在写入模型文件...");
     updater::update_model(&data, target_dir)?;
     println!("✅ 模型更新完成！");
     Ok(())
@@ -188,12 +219,13 @@ async fn handle_update_dict(target_dir: &std::path::Path) -> AppResult<()> {
     println!("正在下载方案包以提取词库...");
     let data = downloader::download_with_progress(
         url,
-        Some(Arc::new(print_progress)),
+        Some(Arc::new(print_download_progress)),
         &cancel,
     ).await?;
 
-    println!("正在更新词库...");
-    updater::update_dict(&data, target_dir)?;
+    println!("正在提取词库...");
+    updater::update_dict_with_progress(&data, target_dir, Some(make_extract_callback()))?;
+    println!();
     println!("✅ 词库更新完成！");
     Ok(())
 }
@@ -225,14 +257,17 @@ async fn handle_custom_update(target_dir: &std::path::Path, reader: &mut impl Bu
     println!("正在下载...");
     let data = downloader::download_with_progress(
         &url,
-        Some(Arc::new(print_progress)),
+        Some(Arc::new(print_download_progress)),
         &cancel,
     ).await?;
 
     if is_zip {
-        updater::update_main_scheme(&data, target_dir)?;
+        println!("正在解压...");
+        updater::update_main_scheme_with_progress(&data, target_dir, Some(make_extract_callback()))?;
+        println!();
         println!("✅ 自定义方案更新完成！");
     } else {
+        println!("正在写入模型文件...");
         updater::update_model(&data, target_dir)?;
         println!("✅ 自定义模型更新完成！");
     }

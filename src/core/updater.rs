@@ -6,27 +6,111 @@ use zip::ZipArchive;
 use crate::core::backup;
 use crate::error::{AppError, AppResult};
 
-pub fn update_main_scheme(zip_data: &[u8], target_dir: &Path) -> AppResult<()> {
+pub type ExtractCallback = Box<dyn Fn(ExtractProgress) + Send + Sync>;
+
+#[derive(Debug, Clone)]
+pub struct ExtractProgress {
+    pub current: usize,
+    pub total: usize,
+    pub current_file: String,
+}
+
+/// 档案内部文件迭代 —— 避免调用方持有 ZipArchive 的借用
+struct ArchiveFiles {
+    names: Vec<String>,
+    body: Vec<u8>,
+}
+
+impl ArchiveFiles {
+    fn new(data: &[u8]) -> AppResult<Self> {
+        let mut archive = ZipArchive::new(std::io::Cursor::new(data))?;
+        let mut names = Vec::with_capacity(archive.len());
+        for i in 0..archive.len() {
+            names.push(archive.by_index(i)?.name().to_owned());
+        }
+        Ok(Self {
+            names,
+            body: data.to_vec(),
+        })
+    }
+}
+
+fn extract_zip_with_progress(
+    data: &[u8],
+    target_dir: &Path,
+    filter: Option<&str>,
+    cb: Option<&ExtractCallback>,
+) -> AppResult<()> {
+    let af = ArchiveFiles::new(data)?;
+    let total = af.names.len();
+
+    let mut archive = ZipArchive::new(std::io::Cursor::new(&af.body))?;
+    for (entry_index, name) in af.names.iter().enumerate() {
+        let relative = if let Some(prefix) = filter {
+            let r = name.strip_prefix(prefix).unwrap_or(name);
+            if r.is_empty() || r == name && !r.is_empty() {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
+            }
+            r
+        } else {
+            name.as_str()
+        };
+
+        if relative.is_empty() {
+            continue;
+        }
+
+        let target_path = safe_join(target_dir, relative)?;
+        let mut file = archive.by_index(entry_index)?;
+
+        if file.is_dir() {
+            std::fs::create_dir_all(&target_path)?;
+        } else {
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            extract_file(&mut file, &target_path)?;
+        }
+
+        if let Some(ref cb) = cb {
+            cb(ExtractProgress {
+                current: entry_index + 1,
+                total,
+                current_file: relative.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub fn update_main_scheme_with_progress(
+    zip_data: &[u8],
+    target_dir: &Path,
+    cb: Option<ExtractCallback>,
+) -> AppResult<()> {
     backup::run_with_backup(target_dir, "主方案更新", || {
         std::fs::create_dir_all(target_dir)?;
-        let mut archive = ZipArchive::new(std::io::Cursor::new(zip_data))?;
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let target_path = safe_join(target_dir, file.name())?;
-
-            if file.is_dir() {
-                std::fs::create_dir_all(&target_path)?;
-            } else {
-                if let Some(parent) = target_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                extract_file(&mut file, &target_path)?;
-                tracing::info!("解压: {}", target_path.display());
-            }
-        }
-        Ok(())
+        extract_zip_with_progress(zip_data, target_dir, None, cb.as_ref())
     })
+}
+
+pub fn update_dict_with_progress(
+    zip_data: &[u8],
+    target_dir: &Path,
+    cb: Option<ExtractCallback>,
+) -> AppResult<()> {
+    backup::run_with_backup(target_dir, "词库更新", || {
+        let dicts_dir = target_dir.join("dicts");
+        std::fs::create_dir_all(&dicts_dir)?;
+        extract_zip_with_progress(zip_data, &dicts_dir, Some("dicts/"), cb.as_ref())
+    })
+}
+
+#[allow(dead_code)]
+pub fn update_main_scheme(zip_data: &[u8], target_dir: &Path) -> AppResult<()> {
+    update_main_scheme_with_progress(zip_data, target_dir, None)
 }
 
 pub fn update_model(model_data: &[u8], target_dir: &Path) -> AppResult<()> {
@@ -43,40 +127,9 @@ pub fn update_model(model_data: &[u8], target_dir: &Path) -> AppResult<()> {
     })
 }
 
+#[allow(dead_code)]
 pub fn update_dict(zip_data: &[u8], target_dir: &Path) -> AppResult<()> {
-    backup::run_with_backup(target_dir, "词库更新", || {
-        let dicts_dir = target_dir.join("dicts");
-        std::fs::create_dir_all(&dicts_dir)?;
-
-        let mut archive = ZipArchive::new(std::io::Cursor::new(zip_data))?;
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let name = file.name();
-
-            if !name.starts_with("dicts/") {
-                continue;
-            }
-
-            let relative = name.strip_prefix("dicts/").unwrap_or(name);
-            if relative.is_empty() {
-                continue;
-            }
-
-            let target_path = safe_join(&dicts_dir, relative)?;
-
-            if file.is_dir() {
-                std::fs::create_dir_all(&target_path)?;
-            } else {
-                if let Some(parent) = target_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                extract_file(&mut file, &target_path)?;
-                tracing::info!("词库: {}", target_path.display());
-            }
-        }
-        Ok(())
-    })
+    update_dict_with_progress(zip_data, target_dir, None)
 }
 
 fn safe_join(base: &Path, name: &str) -> AppResult<PathBuf> {
@@ -184,5 +237,25 @@ mod tests {
         let base = Path::new("/tmp/rime");
         let result = safe_join(base, "dicts/cn.dict.yaml");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extract_with_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("rime");
+        let zip_data = create_test_zip();
+
+        let files = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let files = std::sync::Arc::clone(&files);
+            let cb: ExtractCallback = Box::new(move |p| {
+                files.lock().unwrap().push(p.current_file);
+            });
+
+            update_main_scheme_with_progress(&zip_data, &target, Some(cb)).unwrap();
+        }
+
+        let recorded = files.lock().unwrap();
+        assert!(!recorded.is_empty(), "progress callback should be called");
     }
 }

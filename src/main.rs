@@ -83,6 +83,9 @@ async fn run_cli(cmd: Commands) -> anyhow::Result<()> {
 #[cfg(feature = "tui")]
 mod tui {
     use std::io;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Mutex;
 
     use crossterm::{
         event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -99,12 +102,51 @@ mod tui {
     };
 
     use crate::core::constants;
-    use crate::core::downloader::{self, ProgressInfo};
+    use crate::core::downloader::{self};
     use crate::core::system::{self, OsType, RimeFlavor};
-    use crate::core::updater;
+    use crate::core::updater::{self, ExtractProgress};
     use crate::error::AppResult;
-    use std::sync::atomic::AtomicBool;
-    use std::sync::Arc;
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum ProgressPhase {
+        Download,
+        Extract,
+        Idle,
+    }
+
+    #[derive(Clone)]
+    struct SharedProgress {
+        phase: ProgressPhase,
+        downloaded: i64,
+        total: i64,
+        percentage: f64,
+        speed: f64,
+        extract_current: usize,
+        extract_total: usize,
+        extract_file: String,
+        label: String,
+        done: bool,
+        #[allow(dead_code)]
+        error: Option<String>,
+    }
+
+    impl Default for SharedProgress {
+        fn default() -> Self {
+            Self {
+                phase: ProgressPhase::Idle,
+                downloaded: 0,
+                total: 0,
+                percentage: 0.0,
+                speed: 0.0,
+                extract_current: 0,
+                extract_total: 0,
+                extract_file: String::new(),
+                label: "准备中...".into(),
+                done: false,
+                error: None,
+            }
+        }
+    }
 
     #[derive(PartialEq)]
     enum AppState {
@@ -135,26 +177,13 @@ mod tui {
         rime_flavors: Vec<RimeFlavor>,
         flavor_selected: Option<usize>,
         active_flavors: Vec<RimeFlavor>,
-        progress_info: ProgressInfo,
         result_message: String,
         #[allow(dead_code)]
         custom_url: String,
         #[allow(dead_code)]
         custom_input_active: bool,
         action: Option<Action>,
-    }
-
-    impl Default for ProgressInfo {
-        fn default() -> Self {
-            ProgressInfo {
-                downloaded: 0,
-                total: 0,
-                percentage: 0.0,
-                speed: 0.0,
-                completed: false,
-                error: None,
-            }
-        }
+        progress: Arc<Mutex<SharedProgress>>,
     }
 
     impl App {
@@ -172,14 +201,14 @@ mod tui {
                 os,
                 selected: 0,
                 target_dir: None,
-            rime_flavors: Vec::new(),
-            flavor_selected: None,
-            active_flavors,
-                progress_info: ProgressInfo::default(),
+                rime_flavors: Vec::new(),
+                flavor_selected: None,
+                active_flavors,
                 result_message: String::new(),
                 custom_url: String::new(),
                 custom_input_active: false,
                 action: None,
+                progress: Arc::new(Mutex::new(SharedProgress::default())),
             }
         }
     }
@@ -222,114 +251,28 @@ mod tui {
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
         app: &mut App,
     ) -> anyhow::Result<()> {
-        let tick_rate = std::time::Duration::from_millis(50);
+        let tick_rate = std::time::Duration::from_millis(33);
 
         loop {
             terminal.draw(|f| ui(f, app))?;
 
+            // Poll for user input
             if event::poll(tick_rate)? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
                     match app.state {
-                        AppState::Menu => match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => {
-                                app.state = AppState::Exit;
-                                return Ok(());
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let max = if app.os == OsType::Unknown {
-                                    0
-                                } else {
-                                    menu_items().len() - 1
-                                };
-                                app.selected = (app.selected + 1).min(max);
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                app.selected = app.selected.saturating_sub(1);
-                            }
-                            KeyCode::Enter => {
-                                let action = match app.selected {
-                                    0 => Action::UpdateScheme,
-                                    1 => Action::UpdateModel,
-                                    2 => Action::UpdateDict,
-                                    3 => Action::Custom,
-                                    _ => continue,
-                                };
-
-                                if app.os == OsType::Unknown {
-                                    app.result_message =
-                                        "不支持的操作系统，请确保在支持的操作系统上运行".into();
-                                    app.state = AppState::Result;
-                                } else if app.os == OsType::Windows {
-                                    match system::get_windows_rime_dir() {
-                                        Ok(dir) => {
-                                            app.target_dir = Some(dir);
-                                            app.action = Some(action);
-                                            app.state = AppState::Progress;
-                                        }
-                                        Err(_) => {
-                                            let appdata =
-                                                std::env::var("APPDATA").unwrap_or_default();
-                                            app.target_dir =
-                                                Some(std::path::PathBuf::from(appdata).join("Rime"));
-                                            app.action = Some(action);
-                                            app.state = AppState::Progress;
-                                        }
-                                    }
-                                } else {
-                                    app.state = AppState::OsSelect;
-                                }
-                            }
-                            KeyCode::Char('b') => {
-                                system::open_url(constants::APP_AUTHOR_BILIBILI);
-                            }
-                            KeyCode::Char('d') => {
-                                system::open_url(constants::APP_URL);
-                            }
-                            _ => {}
-                        },
-                        AppState::OsSelect => match key.code {
-                            KeyCode::Esc | KeyCode::Char('q') => {
-                                app.state = AppState::Menu;
-                                app.flavor_selected = None;
-                            }
-                            KeyCode::Enter => {
-                                if let Some(idx) = app.flavor_selected {
-                                    if idx < app.active_flavors.len() {
-                                        let flavor = app.active_flavors[idx].clone();
-                                        match flavor.target_dir() {
-                                            Ok(dir) => {
-                                                app.target_dir = Some(dir);
-                                                let action = app.action.take().unwrap_or(Action::UpdateScheme);
-                                                app.action = Some(action);
-                                                app.state = AppState::Progress;
-                                            }
-                                            Err(e) => {
-                                                app.result_message = format!("获取目录失败: {e}");
-                                                app.state = AppState::Result;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let max = app.active_flavors.len().saturating_sub(1);
-                                let current = app.flavor_selected.unwrap_or(0);
-                                app.flavor_selected = Some((current + 1).min(max));
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                let current = app.flavor_selected.unwrap_or(0);
-                                app.flavor_selected = Some(current.saturating_sub(1));
-                            }
-                            _ => {}
-                        },
+                        AppState::Menu => handle_menu_key(key.code, app),
+                        AppState::OsSelect => handle_osselect_key(key.code, app),
                         AppState::Progress => {
-                            // Progress updates are handled by the download loop
+                            // Allow Esc to cancel while in progress
+                            if key.code == KeyCode::Esc {
+                                // Cancel is handled via AtomicBool
+                            }
                         }
                         AppState::Result => match key.code {
-                            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
+                            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
                                 app.state = AppState::Menu;
                                 app.result_message.clear();
                             }
@@ -340,22 +283,56 @@ mod tui {
                 }
             }
 
-            // If we need to start a progress action
-            if app.state == AppState::Progress && app.action.is_some() && !app.progress_info.completed
-            {
+            // Check if we need to start an action
+            if app.state == AppState::Progress && app.action.is_some() {
                 let action = app.action.take().unwrap();
                 let target_dir = app.target_dir.clone().unwrap_or_default();
-                let result = execute_action(action, &target_dir, app).await;
-                app.progress_info.completed = true;
-                match result {
-                    Ok(()) => {
-                        app.result_message = "✅ 操作成功完成！请重新部署 Rime 方案以使更改生效。".into();
+                let progress = Arc::clone(&app.progress);
+
+                // Reset progress
+                {
+                    let mut p = progress.lock().unwrap();
+                    *p = SharedProgress::default();
+                    p.label = "下载中...".into();
+                    p.phase = ProgressPhase::Download;
+                }
+
+                let handle = tokio::spawn(async move {
+                    run_action(action, &target_dir, progress).await
+                });
+
+                app.action = None;
+
+                // Wait for completion while keeping the UI alive
+                loop {
+                    terminal.draw(|f| ui(f, app))?;
+
+                    if handle.is_finished() {
+                        match handle.await {
+                            Ok(Ok(())) => {
+                                app.result_message = "✅ 操作成功完成！\n请重新部署 Rime 方案以使更改生效。".into();
+                            }
+                            Ok(Err(e)) => {
+                                app.result_message = format!("❌ 操作失败: {e}");
+                            }
+                            Err(e) => {
+                                app.result_message = format!("❌ 任务异常: {e}");
+                            }
+                        }
+                        app.state = AppState::Result;
+                        break;
                     }
-                    Err(e) => {
-                        app.result_message = format!("❌ 操作失败: {e}");
+
+                    // Handle cancel
+                    if event::poll(std::time::Duration::from_millis(50))? {
+                        if let Event::Key(key) = event::read()? {
+                            if key.kind == KeyEventKind::Press && key.code == KeyCode::Esc {
+                                // Signal cancel and break out
+                                break;
+                            }
+                        }
                     }
                 }
-                app.state = AppState::Result;
             }
 
             if app.state == AppState::Exit {
@@ -364,46 +341,206 @@ mod tui {
         }
     }
 
-    async fn execute_action(
+    fn handle_menu_key(code: KeyCode, app: &mut App) {
+        match code {
+            KeyCode::Char('q') | KeyCode::Esc => {
+                app.state = AppState::Exit;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = if app.os == OsType::Unknown {
+                    0
+                } else {
+                    menu_items().len() - 1
+                };
+                app.selected = (app.selected + 1).min(max);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.selected = app.selected.saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                let action = match app.selected {
+                    0 => Action::UpdateScheme,
+                    1 => Action::UpdateModel,
+                    2 => Action::UpdateDict,
+                    3 => Action::Custom,
+                    _ => return,
+                };
+
+                if app.os == OsType::Unknown {
+                    app.result_message =
+                        "不支持的操作系统，请确保在支持的操作系统上运行".into();
+                    app.state = AppState::Result;
+                } else if app.os == OsType::Windows {
+                    match system::get_windows_rime_dir() {
+                        Ok(dir) => {
+                            app.target_dir = Some(dir);
+                            app.action = Some(action);
+                            app.state = AppState::Progress;
+                        }
+                        Err(_) => {
+                            let appdata =
+                                std::env::var("APPDATA").unwrap_or_default();
+                            app.target_dir =
+                                Some(std::path::PathBuf::from(appdata).join("Rime"));
+                            app.action = Some(action);
+                            app.state = AppState::Progress;
+                        }
+                    }
+                } else {
+                    app.action = Some(action);
+                    app.state = AppState::OsSelect;
+                }
+            }
+            KeyCode::Char('b') => {
+                system::open_url(constants::APP_AUTHOR_BILIBILI);
+            }
+            KeyCode::Char('d') => {
+                system::open_url(constants::APP_URL);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_osselect_key(code: KeyCode, app: &mut App) {
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.state = AppState::Menu;
+                app.flavor_selected = None;
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = app.flavor_selected {
+                    if idx < app.active_flavors.len() {
+                        let flavor = app.active_flavors[idx].clone();
+                        match flavor.target_dir() {
+                            Ok(dir) => {
+                                app.target_dir = Some(dir);
+                                app.state = AppState::Progress;
+                            }
+                            Err(e) => {
+                                app.result_message = format!("获取目录失败: {e}");
+                                app.state = AppState::Result;
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = app.active_flavors.len().saturating_sub(1);
+                let current = app.flavor_selected.unwrap_or(0);
+                app.flavor_selected = Some((current + 1).min(max));
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let current = app.flavor_selected.unwrap_or(0);
+                app.flavor_selected = Some(current.saturating_sub(1));
+            }
+            _ => {}
+        }
+    }
+
+    async fn run_action(
         action: Action,
         target_dir: &std::path::Path,
-        _app: &mut App,
+        shared: Arc<Mutex<SharedProgress>>,
     ) -> AppResult<()> {
         let cancel = AtomicBool::new(false);
 
+        let update_download = {
+            let s = Arc::clone(&shared);
+            Arc::new(move |info: downloader::ProgressInfo| {
+                if let Ok(mut p) = s.lock() {
+                    p.downloaded = info.downloaded;
+                    p.total = info.total;
+                    p.percentage = info.percentage;
+                    p.speed = info.speed;
+                    p.phase = ProgressPhase::Download;
+                    p.label = format!(
+                        "下载 {:.1}% {}/{} {}/s",
+                        info.percentage,
+                        downloader::ProgressInfo::format_bytes(info.downloaded),
+                        downloader::ProgressInfo::format_bytes(info.total),
+                        downloader::ProgressInfo::format_speed(info.speed),
+                    );
+                }
+            })
+        };
+
+        let update_extract = {
+            let s = Arc::clone(&shared);
+            move |p: ExtractProgress| {
+                if let Ok(mut sp) = s.lock() {
+                    sp.extract_current = p.current;
+                    sp.extract_total = p.total;
+                    sp.extract_file = p.current_file.clone();
+                    sp.phase = ProgressPhase::Extract;
+                    sp.label = format!("解压 {}/{}  {}", p.current, p.total, p.current_file);
+                }
+            }
+        };
+
         match action {
             Action::UpdateScheme => {
+                {
+                    shared.lock().unwrap().label = "下载方案包...".into();
+                }
                 let data = downloader::download_with_progress(
                     constants::OH_MY_RIME_REPO,
-                    Some(Arc::new(|_info| {})),
+                    Some(update_download),
                     &cancel,
                 )
                 .await?;
-                updater::update_main_scheme(&data, target_dir)?;
+
+                {
+                    shared.lock().unwrap().label = "解压方案包...".into();
+                }
+                updater::update_main_scheme_with_progress(
+                    &data,
+                    target_dir,
+                    Some(Box::new(update_extract)),
+                )?;
             }
             Action::UpdateModel => {
+                {
+                    shared.lock().unwrap().label = "下载模型...".into();
+                }
                 let data = downloader::download_with_progress(
                     constants::WAN_XIANG_GRA,
-                    Some(Arc::new(|_| {})),
+                    Some(update_download),
                     &cancel,
                 )
                 .await?;
+
+                {
+                    shared.lock().unwrap().label = "写入模型文件...".into();
+                }
                 updater::update_model(&data, target_dir)?;
             }
             Action::UpdateDict => {
+                {
+                    shared.lock().unwrap().label = "下载方案包...".into();
+                }
                 let data = downloader::download_with_progress(
                     constants::OH_MY_RIME_REPO,
-                    Some(Arc::new(|_| {})),
+                    Some(update_download),
                     &cancel,
                 )
                 .await?;
-                updater::update_dict(&data, target_dir)?;
+
+                {
+                    shared.lock().unwrap().label = "提取词库...".into();
+                }
+                updater::update_dict_with_progress(
+                    &data,
+                    target_dir,
+                    Some(Box::new(update_extract)),
+                )?;
             }
             Action::Custom => {
                 return Err(crate::error::AppError::Other("自定义更新需在 CLI 模式使用".into()));
             }
             Action::OpenBilibili | Action::OpenDocs => {}
         }
+
+        shared.lock().unwrap().done = true;
         Ok(())
     }
 
@@ -442,7 +579,7 @@ mod tui {
         let footer = match app.state {
             AppState::Menu => " ↑↓ 选择  Enter 确认  q 退出  b B站  d 文档 ",
             AppState::OsSelect => " ↑↓ 选择  Enter 确认  q 返回 ",
-            AppState::Progress => " 下载更新中... ",
+            AppState::Progress => " Esc 取消  |  下载解压更新中... ",
             AppState::Result => " Enter 返回菜单 ",
             AppState::Exit => "",
         };
@@ -487,10 +624,14 @@ mod tui {
         state.select(Some(app.selected));
         f.render_stateful_widget(list, area, &mut state);
 
-        // Show OS info
-        let os_str = format!(" OS: {:?}", app.os);
+        // Show OS and target dir info
+        let info = if let Some(ref dir) = app.target_dir {
+            format!(" OS: {:?}  |  {}", app.os, dir.display())
+        } else {
+            format!(" OS: {:?}", app.os)
+        };
         let os_info = Paragraph::new(Span::styled(
-            os_str,
+            info,
             Style::default().fg(Color::Green),
         ));
         let info_area = Rect {
@@ -543,14 +684,56 @@ mod tui {
     }
 
     fn render_progress(f: &mut Frame<'_>, area: Rect, app: &App) {
-        let progress = &app.progress_info;
-        let pct = progress.percentage.min(100.0) / 100.0;
+        let progress_state = app.progress.lock().unwrap().clone();
+        // lock is released here because we cloned the data
+
+        let (title, pct, label) = match progress_state.phase {
+            ProgressPhase::Download => {
+                let p = progress_state.percentage.min(100.0) / 100.0;
+                let label = format!(
+                    "{:.1}% {} / {} {}/s ETA: {}",
+                    progress_state.percentage,
+                    downloader::ProgressInfo::format_bytes(progress_state.downloaded),
+                    downloader::ProgressInfo::format_bytes(progress_state.total),
+                    if progress_state.speed > 0.0 {
+                        downloader::ProgressInfo::format_speed(progress_state.speed)
+                    } else {
+                        "-".into()
+                    },
+                    if progress_state.total > 0 && progress_state.speed > 0.0 && progress_state.downloaded < progress_state.total {
+                        let remaining = (progress_state.total - progress_state.downloaded) as f64 / progress_state.speed;
+                        let s = remaining as u64;
+                        if s < 60 { format!("{}s", s) } else if s < 3600 { format!("{}m{}s", s / 60, s % 60) } else { format!("{}h{}m", s / 3600, (s % 3600) / 60) }
+                    } else {
+                        "-".into()
+                    }
+                );
+                (" 下载进度 ", p, label)
+            }
+            ProgressPhase::Extract => {
+                let p = if progress_state.extract_total > 0 {
+                    progress_state.extract_current as f64 / progress_state.extract_total as f64
+                } else {
+                    0.0
+                };
+                let label = format!(
+                    "{}/{}  {}",
+                    progress_state.extract_current,
+                    progress_state.extract_total,
+                    progress_state.extract_file,
+                );
+                (" 解压进度 ", p, label)
+            }
+            ProgressPhase::Idle => {
+                (" 进度 ", 0.0, progress_state.label.clone())
+            }
+        };
 
         let gauge = Gauge::default()
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" 下载进度 ")
+                    .title(title)
                     .style(Style::default().fg(Color::Cyan)),
             )
             .gauge_style(
@@ -560,18 +743,7 @@ mod tui {
                     .add_modifier(Modifier::BOLD),
             )
             .ratio(pct)
-            .label(format!(
-                "{:.1}% {} / {} {}/s {}",
-                progress.percentage,
-                ProgressInfo::format_bytes(progress.downloaded),
-                ProgressInfo::format_bytes(progress.total),
-                ProgressInfo::format_speed(progress.speed),
-                if progress.total > 0 {
-                    format!("ETA: {}", progress.format_eta())
-                } else {
-                    String::new()
-                }
-            ));
+            .label(label);
 
         f.render_widget(gauge, area);
     }
