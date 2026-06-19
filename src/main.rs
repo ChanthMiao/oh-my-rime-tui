@@ -7,6 +7,10 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "oh-my-rime-tui", version, author)]
 struct Cli {
+    /// Rime 配置目录（不指定则自动检测或询问）
+    #[arg(short, long, global = true)]
+    dir: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -24,7 +28,9 @@ enum Commands {
         /// 文件的下载 URL
         url: String,
     },
-    /// 启动交互式 TUI 界面
+    /// 启动交互式菜单（终端选择模式）
+    Menu,
+    /// 启动 TUI 界面
     Tui,
 }
 
@@ -47,12 +53,15 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "tui"))]
             {
-                eprintln!("TUI 功能未启用。请使用 `--features tui` 重新编译，或使用 CLI 子命令。");
+                eprintln!("TUI 功能未启用。请使用 menu 子命令或直接子命令操作。");
                 std::process::exit(1);
             }
         }
+        Some(Commands::Menu) => {
+            cli::run_menu().await?;
+        }
         Some(cmd) => {
-            run_cli(cmd).await?;
+            run_cli(cmd, cli.dir).await?;
         }
     }
 
@@ -70,13 +79,27 @@ async fn run_tui() -> anyhow::Result<()> {
     unreachable!()
 }
 
-async fn run_cli(cmd: Commands) -> anyhow::Result<()> {
+async fn run_cli(cmd: Commands, dir_override: Option<String>) -> anyhow::Result<()> {
+    use crate::core::system;
+
+    let target_dir = if let Some(ref d) = dir_override {
+        std::path::PathBuf::from(d)
+    } else {
+        cli::resolve_target_dir_interactive()?
+    };
+
+    let os = system::detect_os();
+    eprintln!("OS: {:?}  |  目录: {}", os, target_dir.display());
+
     match cmd {
-        Commands::Scheme | Commands::Model | Commands::Dict | Commands::Custom { .. } => {
-            cli::run_interactive().await?;
-        }
-        Commands::Tui => unreachable!(),
+        Commands::Scheme => cli::run_direct_scheme(&target_dir).await?,
+        Commands::Model => cli::run_direct_model(&target_dir).await?,
+        Commands::Dict => cli::run_direct_dict(&target_dir).await?,
+        Commands::Custom { url } => cli::run_direct_custom(&target_dir, &url).await?,
+        _ => unreachable!(),
     }
+
+    eprintln!("请重新部署 Rime 方案以使更改生效");
     Ok(())
 }
 
