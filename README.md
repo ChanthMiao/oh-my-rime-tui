@@ -14,6 +14,15 @@
 | 运行时依赖 | WebView2 / WebKit | 无 |
 | UI | Wails GUI / 简单 CLI | ratatui TUI / clap CLI |
 
+## 为什么重写
+
+原工具很实用，但个人不满意当前交互体验：
+
+1. 旧版 GUI 过于单调，新版 GUI 基于 WebView，都不喜欢
+2. CLI 滚动进度条太浪费终端空间
+
+改用 Rust 是因为它对 AI 编码相对友好，容易迭代维护。
+
 ## 功能
 
 - 一键下载和更新 Rime 主方案、万象模型、词库
