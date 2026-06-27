@@ -412,6 +412,7 @@ mod tui {
                 } else {
                     app.action = Some(action);
                     app.state = AppState::OsSelect;
+                    app.flavor_selected = Some(0);
                 }
             }
             KeyCode::Char('b') => {
