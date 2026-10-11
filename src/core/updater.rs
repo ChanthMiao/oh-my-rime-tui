@@ -25,7 +25,7 @@ impl ArchiveFiles {
         let mut archive = ZipArchive::new(std::io::Cursor::new(data))?;
         let mut names = Vec::with_capacity(archive.len());
         for i in 0..archive.len() {
-            names.push(archive.by_index(i)?.name().to_owned());
+            names.push(archive.by_index(i)?.name()?.into_owned());
         }
         Ok(Self {
             names,
@@ -148,7 +148,10 @@ fn safe_join(base: &Path, name: &str) -> AppResult<PathBuf> {
     Ok(joined)
 }
 
-fn extract_file(file: &mut zip::read::ZipFile<'_>, target_path: &Path) -> AppResult<()> {
+fn extract_file<R: std::io::Read>(
+    file: &mut zip::read::ZipFile<'_, R>,
+    target_path: &Path,
+) -> AppResult<()> {
     if let Some(parent) = target_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

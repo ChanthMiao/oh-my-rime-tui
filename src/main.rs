@@ -118,7 +118,7 @@ mod tui {
     use ratatui::{
         backend::CrosstermBackend,
         layout::{Alignment, Constraint, Direction, Layout, Rect},
-        style::{Color, Modifier, Style, Stylize},
+        style::{Color, Modifier, Style},
         text::{Line, Span},
         widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap},
         Frame, Terminal,

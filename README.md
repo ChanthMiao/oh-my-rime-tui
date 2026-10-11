@@ -34,6 +34,8 @@
 
 ## 安装
 
+需要 Rust 1.88 或更高版本。
+
 ```bash
 cargo install --path .
 ```
