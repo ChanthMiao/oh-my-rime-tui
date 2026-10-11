@@ -7,7 +7,10 @@ pub enum AppError {
     Download(String),
 
     #[error("HTTP 错误: {status} - {url}")]
-    Http { status: reqwest::StatusCode, url: String },
+    Http {
+        status: reqwest::StatusCode,
+        url: String,
+    },
 
     #[error("I/O 错误: {0}")]
     Io(#[from] std::io::Error),

@@ -106,8 +106,8 @@ async fn run_cli(cmd: Commands, dir_override: Option<String>) -> anyhow::Result<
 #[cfg(feature = "tui")]
 mod tui {
     use std::io;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
     use std::sync::Mutex;
 
     use crossterm::{
@@ -295,7 +295,10 @@ mod tui {
                             }
                         }
                         AppState::Result => match key.code {
-                            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
+                            KeyCode::Enter
+                            | KeyCode::Esc
+                            | KeyCode::Char('q')
+                            | KeyCode::Char(' ') => {
                                 app.state = AppState::Menu;
                                 app.result_message.clear();
                             }
@@ -320,9 +323,8 @@ mod tui {
                     p.phase = ProgressPhase::Download;
                 }
 
-                let handle = tokio::spawn(async move {
-                    run_action(action, &target_dir, progress).await
-                });
+                let handle =
+                    tokio::spawn(async move { run_action(action, &target_dir, progress).await });
 
                 app.action = None;
 
@@ -333,7 +335,8 @@ mod tui {
                     if handle.is_finished() {
                         match handle.await {
                             Ok(Ok(())) => {
-                                app.result_message = "✅ 操作成功完成！\n请重新部署 Rime 方案以使更改生效。".into();
+                                app.result_message =
+                                    "✅ 操作成功完成！\n请重新部署 Rime 方案以使更改生效。".into();
                             }
                             Ok(Err(e)) => {
                                 app.result_message = format!("❌ 操作失败: {e}");
@@ -390,8 +393,7 @@ mod tui {
                 };
 
                 if app.os == OsType::Unknown {
-                    app.result_message =
-                        "不支持的操作系统，请确保在支持的操作系统上运行".into();
+                    app.result_message = "不支持的操作系统，请确保在支持的操作系统上运行".into();
                     app.state = AppState::Result;
                 } else if app.os == OsType::Windows {
                     match system::get_windows_rime_dir() {
@@ -401,10 +403,8 @@ mod tui {
                             app.state = AppState::Progress;
                         }
                         Err(_) => {
-                            let appdata =
-                                std::env::var("APPDATA").unwrap_or_default();
-                            app.target_dir =
-                                Some(std::path::PathBuf::from(appdata).join("Rime"));
+                            let appdata = std::env::var("APPDATA").unwrap_or_default();
+                            app.target_dir = Some(std::path::PathBuf::from(appdata).join("Rime"));
                             app.action = Some(action);
                             app.state = AppState::Progress;
                         }
@@ -559,7 +559,9 @@ mod tui {
                 )?;
             }
             Action::Custom => {
-                return Err(crate::error::AppError::Other("自定义更新需在 CLI 模式使用".into()));
+                return Err(crate::error::AppError::Other(
+                    "自定义更新需在 CLI 模式使用".into(),
+                ));
             }
             Action::OpenBilibili | Action::OpenDocs => {}
         }
@@ -614,11 +616,8 @@ mod tui {
             AppState::Result => " Enter 返回菜单 ",
             AppState::Exit => "",
         };
-        let footer_para = Paragraph::new(Span::styled(
-            footer,
-            Style::default().fg(Color::Cyan),
-        ))
-        .alignment(Alignment::Center);
+        let footer_para = Paragraph::new(Span::styled(footer, Style::default().fg(Color::Cyan)))
+            .alignment(Alignment::Center);
         f.render_widget(footer_para, chunks[2]);
     }
 
@@ -641,7 +640,10 @@ mod tui {
                             .add_modifier(Modifier::BOLD),
                     ))
                 } else {
-                    Line::from(Span::styled(format!("{prefix}{item}"), Style::default().fg(Color::White)))
+                    Line::from(Span::styled(
+                        format!("{prefix}{item}"),
+                        Style::default().fg(Color::White),
+                    ))
                 };
                 ListItem::new(content)
             })
@@ -717,9 +719,9 @@ mod tui {
         let vert = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1),  // status label
-                Constraint::Length(3),  // gauge
-                Constraint::Length(1),  // detail
+                Constraint::Length(1), // status label
+                Constraint::Length(3), // gauge
+                Constraint::Length(1), // detail
             ])
             .split(center_rect(area, area.width.min(50), 5));
 
@@ -733,12 +735,21 @@ mod tui {
                     downloader::ProgressInfo::format_bytes(progress_state.total),
                 );
                 let detail = if progress_state.total > 0 && progress_state.speed > 0.0 {
-                    let remaining = (progress_state.total - progress_state.downloaded) as f64 / progress_state.speed;
+                    let remaining = (progress_state.total - progress_state.downloaded) as f64
+                        / progress_state.speed;
                     let s = remaining as u64;
-                    let eta = if s < 60 { format!("{}s", s) }
-                        else if s < 3600 { format!("{}m{}s", s / 60, s % 60) }
-                        else { format!("{}h{}m", s / 3600, (s % 3600) / 60) };
-                    format!("{}  ETA: {}", downloader::ProgressInfo::format_speed(progress_state.speed), eta)
+                    let eta = if s < 60 {
+                        format!("{}s", s)
+                    } else if s < 3600 {
+                        format!("{}m{}s", s / 60, s % 60)
+                    } else {
+                        format!("{}h{}m", s / 3600, (s % 3600) / 60)
+                    };
+                    format!(
+                        "{}  ETA: {}",
+                        downloader::ProgressInfo::format_speed(progress_state.speed),
+                        eta
+                    )
                 } else {
                     String::new()
                 };
@@ -750,23 +761,30 @@ mod tui {
                 } else {
                     0.0
                 };
-                let label = format!("{}/{} 个文件", progress_state.extract_current, progress_state.extract_total);
+                let label = format!(
+                    "{}/{} 个文件",
+                    progress_state.extract_current, progress_state.extract_total
+                );
                 let detail = if progress_state.extract_file.len() > 45 {
-                    format!("...{}", &progress_state.extract_file[progress_state.extract_file.len().saturating_sub(42)..])
+                    format!(
+                        "...{}",
+                        &progress_state.extract_file
+                            [progress_state.extract_file.len().saturating_sub(42)..]
+                    )
                 } else {
                     progress_state.extract_file.clone()
                 };
                 (" 解压方案包 ", p, label, detail)
             }
-            ProgressPhase::Idle => {
-                (" 准备中 ", 0.0, progress_state.label.clone(), String::new())
-            }
+            ProgressPhase::Idle => (" 准备中 ", 0.0, progress_state.label.clone(), String::new()),
         };
 
         // Status line
         let status = Paragraph::new(Span::styled(
             title,
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ))
         .alignment(Alignment::Center);
         f.render_widget(status, vert[0]);
@@ -786,8 +804,9 @@ mod tui {
 
         // Detail line
         if !detail.is_empty() {
-            let detail_p = Paragraph::new(Span::styled(detail, Style::default().fg(Color::DarkGray)))
-                .alignment(Alignment::Center);
+            let detail_p =
+                Paragraph::new(Span::styled(detail, Style::default().fg(Color::DarkGray)))
+                    .alignment(Alignment::Center);
             f.render_widget(detail_p, vert[2]);
         }
     }
@@ -813,6 +832,11 @@ mod tui {
     fn center_rect(r: Rect, width: u16, height: u16) -> Rect {
         let x = r.x + (r.width.saturating_sub(width) / 2);
         let y = r.y + (r.height.saturating_sub(height) / 2);
-        Rect { x, y, width, height }
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }

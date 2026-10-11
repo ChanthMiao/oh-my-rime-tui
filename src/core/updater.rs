@@ -125,24 +125,20 @@ pub fn update_dict(zip_data: &[u8], target_dir: &Path) -> AppResult<()> {
 
 fn safe_join(base: &Path, name: &str) -> AppResult<PathBuf> {
     let clean = PathBuf::from(name);
-    if clean.has_root() || clean.components().any(|c| c == std::path::Component::ParentDir) {
-        return Err(AppError::UnsafePath {
-            path: clean,
-        });
+    if clean.has_root()
+        || clean
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(AppError::UnsafePath { path: clean });
     }
 
     let joined = base.join(&clean);
-    let canonical_base = base
-        .canonicalize()
-        .unwrap_or_else(|_| base.to_path_buf());
-    let canonical_joined = joined
-        .canonicalize()
-        .unwrap_or_else(|_| joined.clone());
+    let canonical_base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    let canonical_joined = joined.canonicalize().unwrap_or_else(|_| joined.clone());
 
     if !canonical_joined.starts_with(&canonical_base) {
-        return Err(AppError::UnsafePath {
-            path: clean,
-        });
+        return Err(AppError::UnsafePath { path: clean });
     }
 
     Ok(joined)

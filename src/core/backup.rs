@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::error::{AppError, AppResult};
 use crate::core::constants::BACKUP_KEEP_COUNT;
+use crate::error::{AppError, AppResult};
 
 pub fn create_backup(target_dir: &Path) -> AppResult<(PathBuf, bool)> {
     if !target_dir.exists() {
@@ -35,7 +35,11 @@ pub fn restore_backup(target_dir: &Path, backup_dir: &Path) -> AppResult<()> {
         std::fs::remove_dir_all(target_dir)?;
     }
     copy_dir(backup_dir, target_dir)?;
-    tracing::info!("已恢复备份: {} -> {}", backup_dir.display(), target_dir.display());
+    tracing::info!(
+        "已恢复备份: {} -> {}",
+        backup_dir.display(),
+        target_dir.display()
+    );
     Ok(())
 }
 

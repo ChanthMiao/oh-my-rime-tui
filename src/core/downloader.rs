@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::core::constants::USER_AGENT;
@@ -101,7 +101,8 @@ pub async fn download_with_progress(
         let chunk = chunk.map_err(|e| AppError::Download(format!("流读取失败: {e}")))?;
         data.extend_from_slice(&chunk);
 
-        let current = downloaded.fetch_add(chunk.len() as i64, Ordering::Relaxed) + chunk.len() as i64;
+        let current =
+            downloaded.fetch_add(chunk.len() as i64, Ordering::Relaxed) + chunk.len() as i64;
         let elapsed = start.elapsed().as_secs_f64();
         let speed = if elapsed > 0.0 {
             current as f64 / elapsed

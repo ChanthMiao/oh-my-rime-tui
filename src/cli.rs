@@ -80,16 +80,17 @@ pub async fn run_direct_custom(target_dir: &std::path::Path, url: &str) -> AppRe
 
     let cancel = AtomicBool::new(false);
     eprintln!("正在下载...");
-    let data = downloader::download_with_progress(
-        url,
-        Some(Arc::new(print_download_progress)),
-        &cancel,
-    )
-    .await?;
+    let data =
+        downloader::download_with_progress(url, Some(Arc::new(print_download_progress)), &cancel)
+            .await?;
 
     if is_zip {
         eprintln!("正在解压...");
-        updater::update_main_scheme_with_progress(&data, target_dir, Some(make_extract_callback()))?;
+        updater::update_main_scheme_with_progress(
+            &data,
+            target_dir,
+            Some(make_extract_callback()),
+        )?;
         eprintln!();
         eprintln!("自定义方案更新完成");
     } else {
@@ -242,12 +243,9 @@ async fn run_update_scheme(target_dir: &std::path::Path) -> AppResult<()> {
     let url = crate::core::constants::OH_MY_RIME_REPO;
 
     eprintln!("正在下载方案包...");
-    let data = downloader::download_with_progress(
-        url,
-        Some(Arc::new(print_download_progress)),
-        &cancel,
-    )
-    .await?;
+    let data =
+        downloader::download_with_progress(url, Some(Arc::new(print_download_progress)), &cancel)
+            .await?;
 
     eprintln!("正在解压方案包...");
     updater::update_main_scheme_with_progress(&data, target_dir, Some(make_extract_callback()))?;
@@ -261,12 +259,9 @@ async fn run_update_model(target_dir: &std::path::Path) -> AppResult<()> {
     let url = crate::core::constants::WAN_XIANG_GRA;
 
     eprintln!("正在下载模型...");
-    let data = downloader::download_with_progress(
-        url,
-        Some(Arc::new(print_download_progress)),
-        &cancel,
-    )
-    .await?;
+    let data =
+        downloader::download_with_progress(url, Some(Arc::new(print_download_progress)), &cancel)
+            .await?;
 
     eprintln!("正在写入模型文件...");
     updater::update_model(&data, target_dir)?;
@@ -279,12 +274,9 @@ async fn run_update_dict(target_dir: &std::path::Path) -> AppResult<()> {
     let url = crate::core::constants::OH_MY_RIME_REPO;
 
     eprintln!("正在下载方案包以提取词库...");
-    let data = downloader::download_with_progress(
-        url,
-        Some(Arc::new(print_download_progress)),
-        &cancel,
-    )
-    .await?;
+    let data =
+        downloader::download_with_progress(url, Some(Arc::new(print_download_progress)), &cancel)
+            .await?;
 
     eprintln!("正在提取词库...");
     updater::update_dict_with_progress(&data, target_dir, Some(make_extract_callback()))?;
@@ -316,16 +308,17 @@ async fn run_custom_update(
 
     let cancel = AtomicBool::new(false);
     println!("正在下载...");
-    let data = downloader::download_with_progress(
-        &url,
-        Some(Arc::new(print_download_progress)),
-        &cancel,
-    )
-    .await?;
+    let data =
+        downloader::download_with_progress(&url, Some(Arc::new(print_download_progress)), &cancel)
+            .await?;
 
     if is_zip {
         println!("正在解压...");
-        updater::update_main_scheme_with_progress(&data, target_dir, Some(make_extract_callback()))?;
+        updater::update_main_scheme_with_progress(
+            &data,
+            target_dir,
+            Some(make_extract_callback()),
+        )?;
         println!();
         println!("自定义方案更新完成");
     } else {

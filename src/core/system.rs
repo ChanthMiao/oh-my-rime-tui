@@ -74,9 +74,7 @@ mod platform {
     }
 
     pub fn get_linux_flavors() -> Vec<RimeFlavor> {
-        vec![
-            RimeFlavor::Custom(PathBuf::from("C:\\ProgramData\\Rime")),
-        ]
+        vec![RimeFlavor::Custom(PathBuf::from("C:\\ProgramData\\Rime"))]
     }
 
     pub fn get_darwin_flavors() -> Vec<RimeFlavor> {
