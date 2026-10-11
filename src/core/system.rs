@@ -13,9 +13,13 @@ pub enum OsType {
 
 #[derive(Debug, Clone)]
 pub enum RimeFlavor {
+    #[cfg(not(windows))]
     Ibus,
+    #[cfg(not(windows))]
     Fcitx5,
+    #[cfg(not(windows))]
     Fcitx5Flatpak,
+    #[cfg(not(windows))]
     Squirrel,
     #[allow(dead_code)]
     Weasel,
@@ -26,9 +30,13 @@ pub enum RimeFlavor {
 impl RimeFlavor {
     pub fn name(&self) -> &str {
         match self {
+            #[cfg(not(windows))]
             RimeFlavor::Ibus => "iBus",
+            #[cfg(not(windows))]
             RimeFlavor::Fcitx5 => "Fcitx5",
+            #[cfg(not(windows))]
             RimeFlavor::Fcitx5Flatpak => "Fcitx5-Flatpak",
+            #[cfg(not(windows))]
             RimeFlavor::Squirrel => "鼠须管",
             RimeFlavor::Weasel => "小狼毫 (Weasel)",
             RimeFlavor::Custom(_) => "自定义",
@@ -113,11 +121,15 @@ fn default_target_dir(flavor: RimeFlavor) -> AppResult<PathBuf> {
         .map_err(|_| AppError::Other("无法获取用户主目录".into()))?;
 
     let path = match flavor {
+        #[cfg(not(windows))]
         RimeFlavor::Ibus => PathBuf::from(home).join(".config/ibus/rime"),
+        #[cfg(not(windows))]
         RimeFlavor::Fcitx5 => PathBuf::from(home).join(".local/share/fcitx5/rime"),
+        #[cfg(not(windows))]
         RimeFlavor::Fcitx5Flatpak => {
             PathBuf::from(home).join(".var/app/org.fcitx.Fcitx5/data/fcitx5/rime")
         }
+        #[cfg(not(windows))]
         RimeFlavor::Squirrel => PathBuf::from(home).join("Library/Rime"),
         RimeFlavor::Weasel => PathBuf::from(home).join("AppData/Roaming/Rime"),
         RimeFlavor::Custom(p) => p,
