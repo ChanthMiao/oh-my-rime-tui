@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use zip::ZipArchive;
 
@@ -123,22 +123,44 @@ pub fn update_dict(zip_data: &[u8], target_dir: &Path) -> AppResult<()> {
     update_dict_with_progress(zip_data, target_dir, None)
 }
 
+/// 路径中最深的存在祖先的规范化形式；整条路径都不存在时返回原路径。
+///
+/// 两侧都必须经本函数再比较：Windows 上 `canonicalize` 返回 `\\?\C:\...`
+/// 形式，而尚未创建的路径无法规范化、只能退回普通形式，直接与规范化结果
+/// 比较会把合法的目标目录误判为越界。
+fn canonical_existing(path: &Path) -> PathBuf {
+    let mut current = path.to_path_buf();
+    loop {
+        if let Ok(canonical) = current.canonicalize() {
+            return canonical;
+        }
+        match current.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => current = parent.to_path_buf(),
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
 fn safe_join(base: &Path, name: &str) -> AppResult<PathBuf> {
-    let clean = PathBuf::from(name);
-    if clean.has_root()
-        || clean
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
-    {
-        return Err(AppError::UnsafePath { path: clean });
+    let rel = Path::new(name);
+    if rel.components().any(|c| {
+        matches!(
+            c,
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir
+        )
+    }) {
+        return Err(AppError::UnsafePath {
+            path: rel.to_path_buf(),
+        });
     }
 
-    let joined = base.join(&clean);
-    let canonical_base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
-    let canonical_joined = joined.canonicalize().unwrap_or_else(|_| joined.clone());
-
-    if !canonical_joined.starts_with(&canonical_base) {
-        return Err(AppError::UnsafePath { path: clean });
+    // 词法上已排除 `..`、根路径与盘符前缀；此处再解析一次链接，
+    // 防止目标目录内已有的符号链接把写入带出 base 之外。
+    let joined = base.join(rel);
+    if !canonical_existing(&joined).starts_with(canonical_existing(base)) {
+        return Err(AppError::UnsafePath {
+            path: rel.to_path_buf(),
+        });
     }
 
     Ok(joined)
@@ -217,6 +239,45 @@ mod tests {
         let base = Path::new("/tmp/rime");
         let result = safe_join(base, "dicts/cn.dict.yaml");
         assert!(result.is_ok());
+    }
+
+    /// 目标目录已存在、而待写入路径尚未创建时也必须通过：
+    /// Windows 上 `canonicalize(base)` 会带上 `\\?\` 前缀，未创建的路径
+    /// 则保持原样，二者直接比较会误判为越界。
+    #[test]
+    fn test_safe_join_accepts_path_that_does_not_exist_yet() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("rime");
+        std::fs::create_dir_all(&base).unwrap();
+
+        assert_eq!(
+            safe_join(&base, "schemes/default.yaml").unwrap(),
+            base.join("schemes/default.yaml")
+        );
+        assert!(safe_join(&base, "schemes/").is_ok());
+    }
+
+    /// Windows 上 `C:evil` 是盘符相对路径，`join` 会丢弃 base。
+    #[cfg(windows)]
+    #[test]
+    fn test_safe_join_rejects_drive_relative() {
+        let base = Path::new(r"C:\rime");
+        assert!(safe_join(base, r"C:evil").is_err());
+    }
+
+    /// 目标目录内已存在的符号链接不能把写入带出 base 之外。
+    #[cfg(unix)]
+    #[test]
+    fn test_safe_join_rejects_symlink_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("rime");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("link")).unwrap();
+
+        assert!(safe_join(&base, "link/evil.yaml").is_err());
+        assert!(safe_join(&base, "link").is_err());
     }
 
     #[test]
